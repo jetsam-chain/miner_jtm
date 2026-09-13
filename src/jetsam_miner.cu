@@ -255,7 +255,20 @@ static bool fetch_template(const Endpoint& e, const std::string& key, const std:
     n.height = jnum(r, "height", -1);
     n.nonce_idx = jnum(r, "nonce_field_index", -1);
     n.expires = jnum(r, "expires_in_seconds", 0);
-    if (!n.ok()) { static int once = 0; if (!once++) LOG("unexpected RPC response: %.200s", r.c_str()); return false; }
+    if (!n.ok()) {
+        // A node serving external miners keeps one attempt open at a time. Being
+        // told the current one is still active is the protocol working, not a
+        // fault: we already hold that template and are hashing it. Reporting it
+        // as an error every few seconds would teach users to ignore real ones.
+        if (r.find("already active") != std::string::npos) { if (status) *status = -1; return false; }
+        // The node is up and answering but not ready to mine yet — it is still
+        // catching up with the network. That resolves on its own in seconds or
+        // minutes, so it is something to wait through, not to die on.
+        if (r.find("waiting for network synchronization") != std::string::npos ||
+            r.find("not synced") != std::string::npos) { if (status) *status = -2; return false; }
+        static int once = 0; if (!once++) LOG("unexpected RPC response: %.200s", r.c_str());
+        return false;
+    }
     t = n; return true;
 }
 
@@ -382,12 +395,29 @@ int main(int argc, char** argv)
     if (!net_init()) return 1;
     LOG("RPC %s:%d%s", ep.host.c_str(), ep.port, ep.path.c_str());
 
+    // --- watch thread: fetches templates WITHOUT ever stopping the GPU ---
+    Shared sh; std::atomic<bool> stop{false};
+
     // --- reach the node once, before mining, and say plainly what is wrong ---
     // Without this the miner simply spins: no template, no error, no output. The
     // first run of a new user is exactly the run that must not be silent.
+    //
+    // The template this fetches is KEPT, not discarded. A node serving external
+    // miners holds one mining attempt open at a time: throwing this one away and
+    // asking again gets "external mining attempt is already active" forever, and
+    // the miner never starts. Found on a fresh node behind the desktop wallet.
     {
         Tmpl probe; int st = 0;
-        if (!fetch_template(ep, key, coinbase, probe, &st)) {
+        bool got = fetch_template(ep, key, coinbase, probe, &st);
+        // -2: the node is still synchronising. Wait for it rather than exit —
+        // starting the miner while the node catches up is a normal thing to do,
+        // and dying on it is what made the desktop wallet look broken.
+        for (int waited = 0; !got && st == -2 && waited < 1800; waited += 5) {
+            if (waited == 0) LOG("the node is still synchronising with the network - waiting");
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            got = fetch_template(ep, key, coinbase, probe, &st);
+        }
+        if (!got) {
             if (st == 401 || st == 403)
                 LOG("the node refused the mining key (HTTP %d) - %s", st,
                     key.empty() ? "this node requires one: pass --key TOKEN"
@@ -403,10 +433,11 @@ int main(int argc, char** argv)
             return 1;
         }
         LOG("node reachable, mining on top of height %lld", probe.height);
+        std::lock_guard<std::mutex> g(sh.m);
+        sh.t = probe;
+        sh.fresh = true;
     }
 
-    // --- watch thread: fetches templates WITHOUT ever stopping the GPU ---
-    Shared sh; std::atomic<bool> stop{false};
     std::thread poller([&]{
         int fails = 0;
         while (!stop.load()) {
@@ -415,6 +446,10 @@ int main(int argc, char** argv)
                 if (fails) { LOG("node reachable again"); fails = 0; }
                 std::lock_guard<std::mutex> g(sh.m);
                 if (t.height != sh.t.height || t.id != sh.t.id) { sh.t = t; sh.fresh = true; }
+            } else if (st == -1) {
+                // the node still holds the attempt we are already mining
+            } else if (st == -2) {
+                if (++fails == 1 || fails % 60 == 0) LOG("the node is resynchronising - holding");
             } else if (++fails == 1 || fails % 50 == 0) {
                 // The template already in hand stays valid for a while, so a blip is
                 // not fatal and must not stop the GPU - but it must be visible.
