@@ -1,0 +1,43 @@
+Jetsam GPU miner
+Copyright 2026 the Jetsam developers
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+-------------------------------------------------------------------------------
+
+This miner computes TowerHash, the Jetsam proof-of-work. TowerHash descends from
+the proof-of-work of Parano1d, used under the Apache License, Version 2.0:
+
+  Parano1d
+  Copyright 2026 Paranoid Zero
+  Designed and developed by Ignotus Nemo
+
+  Portions of the binary-field implementation are derived from hekate-math:
+  https://github.com/oumuamua-labs/hekate-math
+
+  hekate-math
+  Copyright 2026 Andrei Kochergin and Oumuamua Labs.
+
+Jetsam is an independent network. It is not endorsed by, affiliated with, or
+supported by Paranoid Zero or Ignotus Nemo.
+
+-------------------------------------------------------------------------------
+
+TowerHash is built on the Poseidon2b permutation over binary tower fields,
+published as:
+
+  "Poseidon(2)b: Binary Field Versions of Poseidon/Poseidon2"
+  Lorenzo Grassi et al., IACR ePrint 2025/1893
+  https://eprint.iacr.org/2025/1893
+
+Jetsam instantiates that permutation with its own round constants, domain
+separation tags, sponge schedule and nonce lane. The permutation itself is
+unmodified in structure; Jetsam does not claim to have designed it.
+
+-------------------------------------------------------------------------------
+
+The round constants, IV, MDS constants and basis-change tables in
+src/jetsam_pow_hybrid_constants.cuh and src/jetsam_pow_hybrid_tables.cuh are
+generated, not transcribed. tools/gen_hybrid.py derives all of them from the
+Jetsam node sources and rewrites both headers; running it reproduces the files
+shipped here byte for byte.
