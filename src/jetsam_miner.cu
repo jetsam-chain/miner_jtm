@@ -39,6 +39,13 @@
    static inline void set_nodelay(SOCK_T fd) {
        BOOL one = TRUE; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&one, sizeof one);
    }
+   // Winsock has to be started before any socket call, or every one of them fails
+   // with WSANOTINITIALISED — which looks exactly like an unreachable node.
+   static inline bool net_init() {
+       WSADATA w; int rc = WSAStartup(MAKEWORD(2, 2), &w);
+       if (rc != 0) fprintf(stderr, "WSAStartup failed: %d\n", rc);
+       return rc == 0;
+   }
 #else
 #  include <unistd.h>
 #  include <netdb.h>
@@ -54,6 +61,7 @@
    static inline void set_nodelay(SOCK_T fd) {
        int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
    }
+   static inline bool net_init() { return true; }
 #endif
 #include <cuda_runtime.h>
 #define HYB_DIAG_TABLE 1
@@ -371,6 +379,7 @@ int main(int argc, char** argv)
 
     Endpoint ep;
     if (!parse_url(rpc, ep)) return 1;
+    if (!net_init()) return 1;
     LOG("RPC %s:%d%s", ep.host.c_str(), ep.port, ep.path.c_str());
 
     // --- reach the node once, before mining, and say plainly what is wrong ---

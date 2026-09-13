@@ -15,8 +15,8 @@ the one you pass to `--rpc`.
   is recent enough to look fine and is not. Older toolkits still build: the script
   detects it and compiles a software multiply instead, bit-for-bit identical and
   about a third of the speed. Watch for the warning it prints.
-- Linux is the tested platform. The source builds for Windows (Winsock2 under
-  `_WIN32`), but no Windows binary is published and that path has not been run.
+- **Linux and Windows** are both built and tested. Windows needs Visual Studio
+  Build Tools (C++ workload) alongside the CUDA toolkit, since `nvcc` drives `cl.exe`.
 
 ## Build
 
@@ -29,6 +29,17 @@ that cards newer than your toolkit still run. If nvcc rejects your host compiler
 
 ```sh
 CCBIN=/usr/bin/g++-12 ./build.sh
+```
+
+On Windows, with the CUDA toolkit and the Build Tools C++ workload installed:
+
+```bat
+nvcc -ccbin "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\<ver>\bin\Hostx64\x64" ^
+     -O3 -std=c++17 -cudart static ^
+     -gencode arch=compute_75,code=sm_75 -gencode arch=compute_86,code=sm_86 ^
+     -gencode arch=compute_89,code=sm_89 -gencode arch=compute_120,code=sm_120 ^
+     -gencode arch=compute_120,code=compute_120 ^
+     -o jetsam-miner.exe src\jetsam_miner.cu
 ```
 
 ## Run the gate first
@@ -110,9 +121,10 @@ crosses between occupied columns; mask the result back and you have the carry-le
 product. Karatsuba then builds 64×64 from three 32×32 products instead of four.
 
 It was checked against a naive shift-xor reference on 4,194,304 random pairs with
-zero disagreements, and it passes the same 12000-vector gate. Measured cost on one
-card: **×2.3** — a Turing card mines at about 43 % of what the same silicon would do
-with `clmad`. Slower, but real mining.
+zero disagreements, and it passes the same 12000-vector gate. Measured cost, both
+paths benchmarked back to back on an exclusive card: **×3.0** — so a Turing card
+mines at about a third of what the same silicon would do with `clmad`. Slower, but
+real mining.
 
 `-DJETSAM_FORCE_SOFT_CLMUL` forces that path on any card, which is how it gets
 tested on hardware that does have `clmad`.
